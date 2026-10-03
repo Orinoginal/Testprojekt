@@ -43,7 +43,7 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 cv.width = COLS * T; cv.height = ROWS * T + HUD;
 
 const DIRS = [{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}];
-const GHOST_COLORS = ['#ff4d6d', '#4dd9ff', '#ffb84d', '#c77dff'];
+const GHOST_COLORS = ['#8b5a2b', '#a0672f', '#6f4420', '#5a3a1a'];
 let grid, poops, score, lives, level, player, ghosts, frightened, state, tick;
 
 function reset(full) {
@@ -134,25 +134,30 @@ function update() {
 }
 
 // ---------- Zeichnen ----------
-function rainbow(i) { return `hsl(${(i * 70) % 360} 90% 60%)`; }
-
-function drawPoop(cx, cy, big) {
-  const s = big ? 1 : 0.55;
-  const bob = big ? Math.sin(tick / 8) * 1.5 : 0;
-  cy += bob;
-  const layers = [[0, 9, 6.5], [-5, 6.5, 5], [-9, 4, 3.5]];
-  layers.forEach(([dy, w, h], i) => {
-    ctx.fillStyle = rainbow(i * 2 + (big ? tick / 6 : 0));
-    ctx.beginPath(); ctx.ellipse(cx, cy + dy * s + 2, w * s, h * s, 0, 0, Math.PI * 2); ctx.fill();
-  });
-  ctx.fillStyle = rainbow(6 + (big ? tick / 6 : 0));
-  ctx.beginPath(); ctx.moveTo(cx - 2 * s, cy - 11 * s); ctx.lineTo(cx, cy - 17 * s); ctx.lineTo(cx + 2 * s, cy - 11 * s); ctx.fill();
-  if (big) {
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(cx - 3, cy - 1, 1.6, 0, 7); ctx.arc(cx + 3, cy - 1, 1.6, 0, 7); ctx.fill();
-    ctx.fillStyle = '#222';
-    ctx.beginPath(); ctx.arc(cx - 3, cy - 1, .8, 0, 7); ctx.arc(cx + 3, cy - 1, .8, 0, 7); ctx.fill();
+// Blume: kleine = Futter, grosse = Power-Blume. Farbe abwechselnd lila/pink je Feld.
+function drawFlower(cx, cy, big, x, y) {
+  const pink = (x + y) % 2 === 0;
+  const s = big ? 1 : 0.5;
+  const spin = big ? tick / 40 : 0;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(spin);
+  ctx.fillStyle = pink ? '#ff5fb8' : '#a45bff';
+  for (let i = 0; i < 5; i++) {
+    ctx.rotate(Math.PI * 2 / 5);
+    ctx.beginPath(); ctx.ellipse(0, -6 * s, 3.8 * s, 6 * s, 0, 0, 7); ctx.fill();
   }
+  ctx.fillStyle = '#ffe14d';
+  ctx.beginPath(); ctx.arc(0, 0, 3 * s, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+function drawPoopBody(x, y, color) {
+  ctx.fillStyle = color;
+  [[8, 11, 6.5], [0, 8, 5.5], [-7, 5, 4]].forEach(([dy, w, h]) => {
+    ctx.beginPath(); ctx.ellipse(x, y + dy, w, h, 0, 0, 7); ctx.fill();
+  });
+  ctx.beginPath(); ctx.moveTo(x - 3, y - 9); ctx.quadraticCurveTo(x + 1, y - 12, x + 4, y - 15); ctx.lineTo(x + 4, y - 9); ctx.fill();
 }
 
 function drawGhost(g) {
@@ -160,12 +165,7 @@ function drawGhost(g) {
   const scared = frightened > 0 && !g.eyes;
   const blink = scared && frightened < 120 && Math.floor(frightened / 10) % 2;
   if (!g.eyes) {
-    ctx.fillStyle = scared ? (blink ? '#fff' : '#3355ff') : g.color;
-    ctx.beginPath();
-    ctx.arc(x, y - 1, 11, Math.PI, 0);
-    ctx.lineTo(x + 11, y + 11);
-    for (let i = 0; i < 4; i++) ctx.lineTo(x + 11 - (i + .5) * 5.5, y + (i % 2 ? 11 : 7)), ctx.lineTo(x + 11 - (i + 1) * 5.5, y + 11);
-    ctx.fill();
+    drawPoopBody(x, y - 2, scared ? (blink ? '#fff' : '#3355ff') : g.color);
   }
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.arc(x - 4, y - 3, 3.3, 0, 7); ctx.arc(x + 4, y - 3, 3.3, 0, 7); ctx.fill();
@@ -199,13 +199,13 @@ function draw() {
       ctx.fillStyle = '#3a1f78'; ctx.fillRect(px + 1, py + 1, T - 2, T - 2);
       ctx.fillStyle = '#7b4dff'; ctx.fillRect(px + 1, py + 1, T - 2, 3);
     } else if (t === '-') { ctx.fillStyle = '#ff9de2'; ctx.fillRect(px, py + T / 2 - 2, T, 4); }
-    else if (t === '.') drawPoop(px + T / 2, py + T / 2 + 2, false);
-    else if (t === 'o') drawPoop(px + T / 2, py + T / 2 + 2, true);
+    else if (t === '.') drawFlower(px + T / 2, py + T / 2, false, x, y);
+    else if (t === 'o') drawFlower(px + T / 2, py + T / 2, true, x, y);
   }
   ghosts.forEach(drawGhost);
   if (state !== 'dead' && state !== 'over' || tick % 20 < 14) drawPlayer();
   // Overlay
-  const msg = { ready: 'BEREIT?', won: 'GESCHAFFT! 🌈 Enter = nächstes Level', over: 'GAME OVER — Enter = Neustart' }[state];
+  const msg = { ready: 'BEREIT?', won: 'GESCHAFFT! 🌸 Enter = nächstes Level', over: 'GAME OVER — Enter = Neustart' }[state];
   if (msg) {
     ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, cv.height / 2 - 30, cv.width, 60);
     ctx.fillStyle = '#ffe14d'; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center'; ctx.fillText(msg, cv.width / 2, cv.height / 2);
