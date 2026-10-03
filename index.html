@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Einhorn-Man</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14081f; color: #fff; font-family: system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  canvas { background: #1b0f2e; border: 3px solid #7b4dff; border-radius: 8px; max-width: 98vw; max-height: 86vh; touch-action: none; }
+  p { margin: 0; font-size: 13px; opacity: .7; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<p>Pfeiltasten / WASD oder Wischen · Enter = Neustart</p>
+<script>
+const MAP = [
+"#####################",
+"#.........#.........#",
+"#.##.####.#.####.##.#",
+"#o.................o#",
+"#.##.#.#######.#.##.#",
+"#....#....#....#....#",
+"####.####.#.####.####",
+"####.#.........#.####",
+"####.#.###-###.#.####",
+"#.....#   G   #.....#",
+"#.###.#########.###.#",
+"#...................#",
+"#.##.###.#.#.###.##.#",
+"#o...#.........#...o#",
+"##.#.#.#######.#.#.##",
+"#.....#.......#.....#",
+"#.######.###.######.#",
+"#...................#",
+"#.##.#.#######.#.##.#",
+"#o.................o#",
+"#####################"
+];
+const T = 28, COLS = 21, ROWS = MAP.length, HUD = 40;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+cv.width = COLS * T; cv.height = ROWS * T + HUD;
+
+const DIRS = [{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}];
+const GHOST_COLORS = ['#ff4d6d', '#4dd9ff', '#ffb84d', '#c77dff'];
+let grid, poops, score, lives, level, player, ghosts, frightened, state, tick;
+
+function reset(full) {
+  if (full) {
+    grid = MAP.map(r => r.split(''));
+    poops = 0;
+    for (const r of grid) for (const c of r) if (c === '.' || c === 'o') poops++;
+    score = 0; lives = 3; level = 1;
+  }
+  player = { tx: 10, ty: 17, dir: {x:0,y:0}, want: {x:0,y:0}, p: 0, face: -1 };
+  ghosts = [0,1,2,3].map(i => ({ tx: 8 + i, ty: 9, dir: {x:0,y:-1}, p: 0, home: 8 + i, color: GHOST_COLORS[i], release: 60 + i * 150, eyes: false }));
+  frightened = 0; tick = 0; state = 'ready';
+  setTimeout(() => { if (state === 'ready') state = 'play'; }, 1200);
+}
+
+const tile = (x, y) => (y < 0 || y >= ROWS || x < 0 || x >= COLS) ? '#' : grid[y][x];
+const canWalk = (x, y, ghost) => { const t = tile(x, y); return t !== '#' && (t !== '-' || ghost); };
+
+function stepEntity(e, speed, ghost, choose) {
+  if (e.dir.x || e.dir.y) {
+    e.p += speed;
+    if (e.p >= 1) { e.tx += e.dir.x; e.ty += e.dir.y; e.p -= 1; choose(e, true); }
+  } else choose(e, false);
+}
+
+function choosePlayer(e, arrived) {
+  if (arrived) eat();
+  const w = e.want;
+  if ((w.x || w.y) && canWalk(e.tx + w.x, e.ty + w.y, false)) e.dir = { x: w.x, y: w.y };
+  else if (!canWalk(e.tx + e.dir.x, e.ty + e.dir.y, false)) { e.dir = {x:0,y:0}; e.p = 0; }
+  if (e.dir.x) e.face = e.dir.x;
+}
+
+function chooseGhost(g) {
+  if (g.release > 0) { g.dir = {x:0,y:0}; return; }
+  let target;
+  if (g.eyes) target = { x: 10, y: 9 };
+  else if (frightened > 0) target = null;
+  else {
+    const i = ghosts.indexOf(g);
+    target = { x: player.tx, y: player.ty };
+    if (i === 1) { target.x += player.dir.x * 4; target.y += player.dir.y * 4; }
+    if (i === 2 && Math.hypot(g.tx - player.tx, g.ty - player.ty) < 6) target = { x: 1, y: 19 };
+    if (i === 3 && Math.random() < .35) target = null;
+  }
+  const opts = DIRS.filter(d => canWalk(g.tx + d.x, g.ty + d.y, true) &&
+    !(d.x === -g.dir.x && d.y === -g.dir.y) &&
+    !(tile(g.tx + d.x, g.ty + d.y) === '-' && !g.eyes && g.ty < 9));
+  if (!opts.length) { g.dir = { x: -g.dir.x, y: -g.dir.y }; return; }
+  if (!target) g.dir = opts[Math.floor(Math.random() * opts.length)];
+  else g.dir = opts.reduce((b, d) =>
+    Math.hypot(g.tx + d.x - target.x, g.ty + d.y - target.y) < Math.hypot(g.tx + b.x - target.x, g.ty + b.y - target.y) ? d : b);
+}
+
+function eat() {
+  const t = tile(player.tx, player.ty);
+  if (t === '.' || t === 'o') {
+    grid[player.ty][player.tx] = ' ';
+    poops--;
+    score += t === 'o' ? 50 : 10;
+    if (t === 'o') { frightened = 60 * 7; ghosts.forEach(g => { if (!g.eyes && g.release <= 0) g.dir = { x: -g.dir.x, y: -g.dir.y }; }); }
+    if (poops === 0) { state = 'won'; }
+  }
+}
+
+function update() {
+  if (state !== 'play') return;
+  tick++;
+  stepEntity(player, 0.14, false, choosePlayer);
+  if (frightened > 0) frightened--;
+  for (const g of ghosts) {
+    if (g.release > 0) {
+      g.release--;
+      if (g.release === 0) { g.tx = 10; g.ty = 9; g.p = 0; g.eyes = false; g.dir = {x:0,y:-1}; }
+      continue;
+    }
+    const sp = g.eyes ? 0.25 : frightened > 0 ? 0.08 : 0.12 + (level - 1) * 0.005;
+    stepEntity(g, sp, true, chooseGhost);
+    if (g.eyes && g.tx === 10 && g.ty === 9) { g.eyes = false; g.release = 90; g.tx = 8 + ghosts.indexOf(g); }
+    // Kollision
+    const gx = g.tx + g.dir.x * g.p, gy = g.ty + g.dir.y * g.p;
+    const px = player.tx + player.dir.x * player.p, py = player.ty + player.dir.y * player.p;
+    if (!g.eyes && Math.hypot(gx - px, gy - py) < 0.7) {
+      if (frightened > 0) { g.eyes = true; score += 200; }
+      else { lives--; state = lives > 0 ? 'dead' : 'over'; if (lives > 0) setTimeout(() => reset(false), 1200); }
+    }
+  }
+}
+
+// ---------- Zeichnen ----------
+function rainbow(i) { return `hsl(${(i * 70) % 360} 90% 60%)`; }
+
+function drawPoop(cx, cy, big) {
+  const s = big ? 1 : 0.55;
+  const bob = big ? Math.sin(tick / 8) * 1.5 : 0;
+  cy += bob;
+  const layers = [[0, 9, 6.5], [-5, 6.5, 5], [-9, 4, 3.5]];
+  layers.forEach(([dy, w, h], i) => {
+    ctx.fillStyle = rainbow(i * 2 + (big ? tick / 6 : 0));
+    ctx.beginPath(); ctx.ellipse(cx, cy + dy * s + 2, w * s, h * s, 0, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.fillStyle = rainbow(6 + (big ? tick / 6 : 0));
+  ctx.beginPath(); ctx.moveTo(cx - 2 * s, cy - 11 * s); ctx.lineTo(cx, cy - 17 * s); ctx.lineTo(cx + 2 * s, cy - 11 * s); ctx.fill();
+  if (big) {
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(cx - 3, cy - 1, 1.6, 0, 7); ctx.arc(cx + 3, cy - 1, 1.6, 0, 7); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(cx - 3, cy - 1, .8, 0, 7); ctx.arc(cx + 3, cy - 1, .8, 0, 7); ctx.fill();
+  }
+}
+
+function drawGhost(g) {
+  const x = (g.tx + g.dir.x * g.p) * T + T / 2, y = HUD + (g.ty + g.dir.y * g.p) * T + T / 2;
+  const scared = frightened > 0 && !g.eyes;
+  const blink = scared && frightened < 120 && Math.floor(frightened / 10) % 2;
+  if (!g.eyes) {
+    ctx.fillStyle = scared ? (blink ? '#fff' : '#3355ff') : g.color;
+    ctx.beginPath();
+    ctx.arc(x, y - 1, 11, Math.PI, 0);
+    ctx.lineTo(x + 11, y + 11);
+    for (let i = 0; i < 4; i++) ctx.lineTo(x + 11 - (i + .5) * 5.5, y + (i % 2 ? 11 : 7)), ctx.lineTo(x + 11 - (i + 1) * 5.5, y + 11);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x - 4, y - 3, 3.3, 0, 7); ctx.arc(x + 4, y - 3, 3.3, 0, 7); ctx.fill();
+  ctx.fillStyle = scared ? '#f33' : '#123';
+  ctx.beginPath(); ctx.arc(x - 4 + g.dir.x * 1.5, y - 3 + g.dir.y * 1.5, 1.6, 0, 7); ctx.arc(x + 4 + g.dir.x * 1.5, y - 3 + g.dir.y * 1.5, 1.6, 0, 7); ctx.fill();
+}
+
+function drawPlayer() {
+  const x = (player.tx + player.dir.x * player.p) * T + T / 2, y = HUD + (player.ty + player.dir.y * player.p) * T + T / 2;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(-player.face, 1);               // Emoji schaut nach links
+  const chomp = 1 + 0.12 * Math.sin(tick / 2.5);
+  ctx.scale(chomp, 1 / chomp);
+  ctx.font = '25px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('🦄', 0, 1);
+  ctx.restore();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  // HUD
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 18px system-ui'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('Punkte: ' + score, 10, HUD / 2);
+  ctx.textAlign = 'center'; ctx.fillText('Level ' + level, cv.width / 2, HUD / 2);
+  ctx.textAlign = 'right'; ctx.fillText('🦄'.repeat(Math.max(lives, 0)), cv.width - 10, HUD / 2);
+  // Labyrinth
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const t = grid[y][x], px = x * T, py = HUD + y * T;
+    if (t === '#') {
+      ctx.fillStyle = '#3a1f78'; ctx.fillRect(px + 1, py + 1, T - 2, T - 2);
+      ctx.fillStyle = '#7b4dff'; ctx.fillRect(px + 1, py + 1, T - 2, 3);
+    } else if (t === '-') { ctx.fillStyle = '#ff9de2'; ctx.fillRect(px, py + T / 2 - 2, T, 4); }
+    else if (t === '.') drawPoop(px + T / 2, py + T / 2 + 2, false);
+    else if (t === 'o') drawPoop(px + T / 2, py + T / 2 + 2, true);
+  }
+  ghosts.forEach(drawGhost);
+  if (state !== 'dead' && state !== 'over' || tick % 20 < 14) drawPlayer();
+  // Overlay
+  const msg = { ready: 'BEREIT?', won: 'GESCHAFFT! 🌈 Enter = nächstes Level', over: 'GAME OVER — Enter = Neustart' }[state];
+  if (msg) {
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, cv.height / 2 - 30, cv.width, 60);
+    ctx.fillStyle = '#ffe14d'; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center'; ctx.fillText(msg, cv.width / 2, cv.height / 2);
+  }
+}
+
+// ---------- Eingabe ----------
+const KEYS = { ArrowRight:0, d:0, D:0, ArrowDown:1, s:1, S:1, ArrowLeft:2, a:2, A:2, ArrowUp:3, w:3, W:3 };
+function setWant(d) {
+  player.want = d;
+  // sofortiges Umkehren erlauben
+  if (d.x === -player.dir.x && d.y === -player.dir.y && (d.x || d.y)) {
+    player.tx += player.dir.x; player.ty += player.dir.y; player.p = 1 - player.p; player.dir = { x: d.x, y: d.y };
+    if (d.x) player.face = d.x;
+  }
+}
+addEventListener('keydown', e => {
+  if (e.key in KEYS) { setWant(DIRS[KEYS[e.key]]); e.preventDefault(); }
+  if (e.key === 'Enter') {
+    if (state === 'won') { const s = score, l = lives, lv = level + 1; reset(true); score = s; lives = l; level = lv; }
+    else if (state === 'over') reset(true);
+  }
+});
+let t0;
+cv.addEventListener('pointerdown', e => { t0 = { x: e.clientX, y: e.clientY }; if (state === 'over' || state === 'won') dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); });
+cv.addEventListener('pointerup', e => {
+  if (!t0) return;
+  const dx = e.clientX - t0.x, dy = e.clientY - t0.y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) > 20) setWant(Math.abs(dx) > Math.abs(dy) ? DIRS[dx > 0 ? 0 : 2] : DIRS[dy > 0 ? 1 : 3]);
+  t0 = null;
+});
+
+// ---------- Loop (60 Hz fest) ----------
+let last = performance.now(), acc = 0;
+function loop(now) {
+  acc += Math.min(now - last, 100); last = now;
+  while (acc >= 1000 / 60) { update(); if (state === 'dead' || state === 'ready') tick++; acc -= 1000 / 60; }
+  draw();
+  requestAnimationFrame(loop);
+}
+reset(true);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
